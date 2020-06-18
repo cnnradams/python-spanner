@@ -20,8 +20,12 @@ from six.moves import queue
 
 from google.cloud.exceptions import NotFound
 from google.cloud.spanner_v1._helpers import _metadata_with_prefix
+from google.cloud.spanner_v1.metrics import get_meter, get_unique_pool_id
+from google.cloud.spanner_v1.metrics import trace_call
+from opentelemetry import metrics
+from opentelemetry.sdk.metrics import ValueObserver, Counter
 
-
+import threading
 _NOW = datetime.datetime.utcnow  # unit tests may replace
 
 
@@ -39,6 +43,13 @@ class AbstractSessionPool(object):
         if labels is None:
             labels = {}
         self._labels = labels
+        self._metrics_labels = {}
+        self._init_opentelemetry_metrics()
+        self.gets = 0
+        self.puts = 0
+        self.fails = 0
+        self.lock = threading.Lock()
+        self._pool_id = f"pool_{get_unique_pool_id()}"
 
     @property
     def labels(self):
@@ -49,7 +60,7 @@ class AbstractSessionPool(object):
         """
         return self._labels
 
-    def bind(self, database):
+    def _bind(self, database):
         """Associate the pool with a database.
 
         :type database: :class:`~google.cloud.spanner_v1.database.Database`
@@ -63,7 +74,7 @@ class AbstractSessionPool(object):
         """
         raise NotImplementedError()
 
-    def get(self):
+    def _get(self):
         """Check a session out from the pool.
 
         Concrete implementations of this method are allowed to raise an
@@ -74,7 +85,7 @@ class AbstractSessionPool(object):
         """
         raise NotImplementedError()
 
-    def put(self, session):
+    def _put(self, session):
         """Return a session to the pool.
 
         :type session: :class:`~google.cloud.spanner_v1.session.Session`
@@ -88,7 +99,7 @@ class AbstractSessionPool(object):
         """
         raise NotImplementedError()
 
-    def clear(self):
+    def _clear(self):
         """Delete all sessions in the pool.
 
         Concrete implementations of this method are allowed to raise an
@@ -99,6 +110,60 @@ class AbstractSessionPool(object):
         """
         raise NotImplementedError()
 
+    def bind(self, database):
+        """Associate the pool with a database.
+
+        :type database: :class:`~google.cloud.spanner_v1.database.Database`
+        :param database: database used by the pool:  used to create sessions
+                         when needed.
+        """
+        self._metrics_labels = {
+            "pool_id": self._pool_id,
+            "database_id": database.name
+        } 
+        self._bind(database)
+
+    def get(self):
+        """Check a session out from the pool.
+        """
+        try:
+            sess = self._get()
+        except:
+            self.fails += 1
+            self._get_session_timeouts.add(1, self._metrics_labels)
+            raise
+        
+        with self.lock:
+            self._current_in_use_sessions += 1
+            self._max_in_use_sessions = max(self._max_in_use_sessions, self._current_in_use_sessions)
+            self._num_acquired_sessions.add(1, self._metrics_labels)
+            self.gets += 1
+        return sess
+
+    def put(self, session):
+        """Return a session to the pool.
+
+        :type session: :class:`~google.cloud.spanner_v1.session.Session`
+        :param session: the session being returned.
+        """
+        self._put(session)
+        with self.lock:
+            self._current_in_use_sessions -= 1
+            self._num_released_sessions.add(1, self._metrics_labels)
+            self.puts += 1
+
+    def clear(self):
+        """Delete all sessions in the pool.
+
+        Concrete implementations of this method are allowed to raise an
+        error to signal that the pool is full, or to block until it is
+        not full.
+
+        :raises NotImplementedError: abstract method
+        """
+        print("Cleared!")
+        self._clear()
+
     def _new_session(self):
         """Helper for concrete methods creating session instances.
 
@@ -108,6 +173,92 @@ class AbstractSessionPool(object):
         if self.labels:
             return self._database.session(labels=self.labels)
         return self._database.session()
+
+    def _init_opentelemetry_metrics(self):
+        meter = get_meter()
+        
+        if not meter:
+            return
+
+        self._current_in_use_sessions = 0
+        self._max_in_use_sessions = 0
+
+        name_prefix = "cloud.google.com/python/spanner/"
+
+        label_keys = ["client_id", "database_id", "instance_id"]
+        def max_in_use_sessions_callback(obs):
+            obs.observe(self._max_in_use_sessions, self._metrics_labels)
+            self._max_in_use_sessions = self._current_in_use_sessions
+            print(self.gets, self.puts, self.gets - self.puts, self.fails)
+
+        meter.register_observer(
+            callback=max_in_use_sessions_callback,
+            name=f"{name_prefix}max_in_use_sessions",
+            description="The maximum number of sessions in use during the last interval.",
+            unit="1",
+            value_type=int,
+            observer_type=ValueObserver,
+            label_keys=label_keys
+        )
+
+        self._get_session_timeouts = meter.create_metric(
+            name=f"{name_prefix}get_session_timeouts",
+            description="The number of get sessions timeouts due to pool exhaustion",
+            unit="1",
+            value_type=int,
+            metric_type=Counter,
+            label_keys=label_keys
+        )
+
+        self._num_acquired_sessions = meter.create_metric(
+            name=f"{name_prefix}num_acquired_sessions",
+            description="The number of sessions acquired from the session pool.",
+            unit="1",
+            value_type=int,
+            metric_type=Counter,
+            label_keys=label_keys
+        )
+
+        self._num_released_sessions = meter.create_metric(
+            name=f"{name_prefix}num_released_sessions",
+            description="The number of sessions released by the user and pool maintainer.",
+            unit="1",
+            value_type=int,
+            metric_type=Counter,
+            label_keys=label_keys
+        )
+
+    def _register_metrics_callbacks(
+        self,
+        max_allowed_sessions_callback=None,
+        num_sessions_in_pool_callback=None
+    ):
+        meter = get_meter()
+        
+        if not meter:
+            return
+
+        name_prefix = "cloud.google.com/python/spanner/"
+
+        if max_allowed_sessions_callback:
+            meter.register_observer(
+                callback=max_allowed_sessions_callback,
+                name=f"{name_prefix}max_allowed_sessions",
+                description="The maximum number of sessions allowed. Configurable by the user.",
+                unit="1",
+                value_type=int,
+                observer_type=ValueObserver
+            )
+
+        if num_sessions_in_pool_callback:
+            meter.register_observer(
+                callback=num_sessions_in_pool_callback,
+                name=f"{name_prefix}num_sessions_in_pool",
+                description="The number of sessions in the pool.",
+                unit="1",
+                value_type=int,
+                observer_type=ValueObserver
+            )
 
     def session(self, **kwargs):
         """Check out a session from the pool.
@@ -158,7 +309,12 @@ class FixedSizePool(AbstractSessionPool):
         self.default_timeout = default_timeout
         self._sessions = queue.LifoQueue(size)
 
-    def bind(self, database):
+        self._register_metrics_callbacks(
+            max_allowed_sessions_callback=lambda obs: obs.observe(self.size, self._metrics_labels),
+            num_sessions_in_pool_callback=lambda obs: obs.observe(self._sessions.qsize(), self._metrics_labels)
+        )
+
+    def _bind(self, database):
         """Associate the pool with a database.
 
         :type database: :class:`~google.cloud.spanner_v1.database.Database`
@@ -178,7 +334,7 @@ class FixedSizePool(AbstractSessionPool):
                 session._session_id = session_pb.name.split("/")[-1]
                 self._sessions.put(session)
 
-    def get(self, timeout=None):  # pylint: disable=arguments-differ
+    def _get(self, timeout=None):  # pylint: disable=arguments-differ
         """Check a session out from the pool.
 
         :type timeout: int
@@ -200,7 +356,7 @@ class FixedSizePool(AbstractSessionPool):
 
         return session
 
-    def put(self, session):
+    def _put(self, session):
         """Return a session to the pool.
 
         Never blocks:  if the pool is full, raises.
@@ -212,7 +368,7 @@ class FixedSizePool(AbstractSessionPool):
         """
         self._sessions.put_nowait(session)
 
-    def clear(self):
+    def _clear(self):
         """Delete all sessions in the pool."""
 
         while True:
@@ -249,6 +405,10 @@ class BurstyPool(AbstractSessionPool):
         self.target_size = target_size
         self._database = None
         self._sessions = queue.LifoQueue(target_size)
+        self._register_metrics_callbacks(
+            num_sessions_in_pool_callback=lambda obs: obs.observe(self._sessions.qsize(), self._metrics_labels)
+        )
+
 
     def bind(self, database):
         """Associate the pool with a database.
@@ -347,6 +507,11 @@ class PingingPool(AbstractSessionPool):
         self.default_timeout = default_timeout
         self._delta = datetime.timedelta(seconds=ping_interval)
         self._sessions = queue.PriorityQueue(size)
+
+        self._register_metrics_callbacks(
+            max_allowed_sessions_callback=lambda obs: obs.observe(self.size, self._metrics_labels),
+            num_sessions_in_pool_callback=lambda obs: obs.observe(self._sessions.qsize(), self._metrics_labels)
+        )
 
     def bind(self, database):
         """Associate the pool with a database.

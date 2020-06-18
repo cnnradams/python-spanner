@@ -20,6 +20,7 @@ __version__ = pkg_resources.get_distribution("google-cloud-spanner").version
 
 from google.cloud.spanner_v1 import param_types
 from google.cloud.spanner_v1 import types
+from google.cloud.spanner_v1 import metrics
 from google.cloud.spanner_v1.client import Client
 from google.cloud.spanner_v1.gapic import enums
 from google.cloud.spanner_v1.keyset import KeyRange
@@ -43,6 +44,7 @@ __all__ = (
     # google.cloud.spanner_v1
     "__version__",
     "param_types",
+    "metrics",
     "types",
     # google.cloud.spanner_v1.client
     "Client",

@@ -22,7 +22,7 @@ from google.cloud._helpers import _pb_timestamp_to_datetime
 from google.cloud.spanner_v1._helpers import _SessionWrapper
 from google.cloud.spanner_v1._helpers import _make_list_value_pbs
 from google.cloud.spanner_v1._helpers import _metadata_with_prefix
-from opentelemetry import trace
+from google.cloud.spanner_v1.metrics import trace_call
 # pylint: enable=ungrouped-imports
 
 
@@ -142,20 +142,20 @@ class Batch(_BatchBase):
         :rtype: datetime
         :returns: timestamp of the committed changes.
         """
-        with trace.get_tracer(__name__).start_as_current_span("commit full"):
-            self._check_state()
-            database = self._session._database
-            api = database.spanner_api
-            metadata = _metadata_with_prefix(database.name)
-            txn_options = TransactionOptions(read_write=TransactionOptions.ReadWrite())
+        self._check_state()
+        database = self._session._database
+        api = database.spanner_api
+        metadata = _metadata_with_prefix(database.name)
+        txn_options = TransactionOptions(read_write=TransactionOptions.ReadWrite())
+        with trace_call("CloudSpanner.Commit", self._session):
             response = api.commit(
                 self._session.name,
                 mutations=self._mutations,
                 single_use_transaction=txn_options,
                 metadata=metadata,
             )
-            self.committed = _pb_timestamp_to_datetime(response.commit_timestamp)
-            return self.committed
+        self.committed = _pb_timestamp_to_datetime(response.commit_timestamp)
+        return self.committed
 
     def __enter__(self):
         """Begin ``with`` block."""

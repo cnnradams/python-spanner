@@ -50,7 +50,6 @@ from google.cloud.spanner_v1.proto.transaction_pb2 import (
 )
 from google.cloud._helpers import _pb_timestamp_to_datetime
 
-from opentelemetry import trace
 # pylint: enable=ungrouped-imports
 
 
@@ -103,7 +102,6 @@ class Database(object):
         self._state = None
         self._create_time = None
         self._restore_info = None
-        self.tracer = trace.get_tracer(__name__)
         if pool is None:
             pool = BurstyPool()
 
@@ -453,8 +451,7 @@ class Database(object):
         :rtype: :class:`~google.cloud.spanner_v1.database.SnapshotCheckout`
         :returns: new wrapper
         """
-        with self.tracer.start_as_current_span("snapshot create"):
-            return SnapshotCheckout(self, **kw)
+        return SnapshotCheckout(self, **kw)
 
     def batch(self):
         """Return an object which wraps a batch.
@@ -465,8 +462,7 @@ class Database(object):
         :rtype: :class:`~google.cloud.spanner_v1.database.BatchCheckout`
         :returns: new wrapper
         """
-        with self.tracer.start_as_current_span("batch create"):
-            return BatchCheckout(self)
+        return BatchCheckout(self)
 
     def batch_snapshot(self, read_timestamp=None, exact_staleness=None):
         """Return an object which wraps a batch read / query.
@@ -645,14 +641,11 @@ class SnapshotCheckout(object):
         self._database = database
         self._session = None
         self._kw = kw
-        self.tracer = trace.get_tracer(__name__)
 
     def __enter__(self):
         """Begin ``with`` block."""
-        with self.tracer.start_as_current_span("Get Session"):
-            session = self._session = self._database._pool.get()
-        with self.tracer.start_as_current_span("Start Snapshot"):
-            return Snapshot(session, **self._kw)
+        session = self._session = self._database._pool.get()
+        return Snapshot(session, **self._kw)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """End ``with`` block."""

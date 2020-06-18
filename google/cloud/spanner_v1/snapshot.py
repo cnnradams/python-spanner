@@ -30,7 +30,7 @@ from google.cloud.spanner_v1._helpers import _metadata_with_prefix
 from google.cloud.spanner_v1._helpers import _SessionWrapper
 from google.cloud.spanner_v1.streamed import StreamedResultSet
 from google.cloud.spanner_v1.types import PartitionOptions
-
+from google.cloud.spanner_v1.metrics import trace_call
 
 def _restart_on_unavailable(restart):
     """Restart iteration after :exc:`.ServiceUnavailable`.
@@ -143,7 +143,10 @@ class _SnapshotBase(_SessionWrapper):
             metadata=metadata,
         )
 
-        iterator = _restart_on_unavailable(restart)
+        with trace_call("CloudSpanner.ReadOnlyTransaction", self._session):
+            iterator = _restart_on_unavailable(restart)
+            # it would be nice to get the amount of retries attempted here,
+            # but since iterator is a generator that we don't want to execute we can't
 
         self._read_request_count += 1
 
@@ -243,7 +246,8 @@ class _SnapshotBase(_SessionWrapper):
             timeout=timeout,
         )
 
-        iterator = _restart_on_unavailable(restart)
+        with trace_call("CloudSpanner.ReadWriteTransaction", self._session): 
+            iterator = _restart_on_unavailable(restart)
 
         self._read_request_count += 1
         self._execute_sql_count += 1
@@ -309,16 +313,17 @@ class _SnapshotBase(_SessionWrapper):
             partition_size_bytes=partition_size_bytes, max_partitions=max_partitions
         )
 
-        response = api.partition_read(
-            session=self._session.name,
-            table=table,
-            columns=columns,
-            key_set=keyset._to_pb(),
-            transaction=transaction,
-            index=index,
-            partition_options=partition_options,
-            metadata=metadata,
-        )
+        with trace_call("CloudSpanner.PartitionReadOnlyTransaction", self._session):
+            response = api.partition_read(
+                session=self._session.name,
+                table=table,
+                columns=columns,
+                key_set=keyset._to_pb(),
+                transaction=transaction,
+                index=index,
+                partition_options=partition_options,
+                metadata=metadata,
+            )
 
         return [partition.partition_token for partition in response.partitions]
 
@@ -385,15 +390,16 @@ class _SnapshotBase(_SessionWrapper):
             partition_size_bytes=partition_size_bytes, max_partitions=max_partitions
         )
 
-        response = api.partition_query(
-            session=self._session.name,
-            sql=sql,
-            transaction=transaction,
-            params=params_pb,
-            param_types=param_types,
-            partition_options=partition_options,
-            metadata=metadata,
-        )
+        with trace_call("CloudSpanner.PartitionReadWriteTransaction", self._session):
+            response = api.partition_query(
+                session=self._session.name,
+                sql=sql,
+                transaction=transaction,
+                params=params_pb,
+                param_types=param_types,
+                partition_options=partition_options,
+                metadata=metadata,
+            )
 
         return [partition.partition_token for partition in response.partitions]
 
@@ -515,8 +521,9 @@ class Snapshot(_SnapshotBase):
         api = database.spanner_api
         metadata = _metadata_with_prefix(database.name)
         txn_selector = self._make_txn_selector()
-        response = api.begin_transaction(
-            self._session.name, txn_selector.begin, metadata=metadata
-        )
+        with trace_call("CloudSpanner.BeginTransaction", self._session):
+            response = api.begin_transaction(
+                self._session.name, txn_selector.begin, metadata=metadata
+            )
         self._transaction_id = response.id
         return self._transaction_id

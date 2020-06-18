@@ -25,6 +25,7 @@ from google.cloud.spanner_v1 import enums
 from google.cloud.spanner_v1 import FixedSizePool
 from google.cloud.spanner_v1 import KeyRange
 from google.cloud.spanner_v1 import KeySet
+from google.cloud.spanner_v1 import metrics
 from google.cloud.spanner_v1 import param_types
 from google.cloud.spanner_v1 import PingingPool
 from google.cloud.spanner_v1 import TransactionPingingPool
@@ -45,4 +46,5 @@ __all__ = (
     "PingingPool",
     "TransactionPingingPool",
     "types",
+    "metrics"
 )
