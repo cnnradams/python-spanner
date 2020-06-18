@@ -22,6 +22,8 @@ tracer = trace.get_tracer(__name__)
 def trace_call(name, session):
     attributes = {
         "db.type": "spanner",
-        "db.url": spanner_client.SpannerClient.SERVICE_ADDRESS
+        "db.url": spanner_client.SpannerClient.SERVICE_ADDRESS,
+        "db.instance": session._database.name,
+        "net.host.name": spanner_client.SpannerClient.SERVICE_ADDRESS
     }
     return tracer.start_as_current_span(name, kind=trace.SpanKind.CLIENT, attributes=attributes)

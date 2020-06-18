@@ -48,23 +48,6 @@ from opentelemetry import trace
 
 _GAPIC_LIBRARY_VERSION = pkg_resources.get_distribution("google-cloud-spanner").version
 
-tracer = trace.get_tracer(__name__)
-def _trace_call(name):
-    def decorator(fn):
-        def wrapper(*args, **kwargs):
-            attributes = {
-                "db.type": "spanner",
-                "db.url": SpannerClient.SERVICE_ADDRESS
-            }
-            metadata = dict(kwargs.get("metadata", []))
-            if "google-cloud-resource-prefix" in metadata:
-                attributes['db.instance'] = metadata["google-cloud-resource-prefix"]
-            span = tracer.start_span(name, trace.Tracer.CURRENT_SPAN, trace.SpanKind.CLIENT, attributes)
-            with tracer.use_span(span, end_on_exit=True):
-                return fn(*args, **kwargs)
-        return wrapper
-    return decorator
-
 class SpannerClient(object):
     """
     Cloud Spanner API
@@ -234,7 +217,6 @@ class SpannerClient(object):
         self._inner_api_calls = {}
 
     # Service calls
-    @_trace_call("CloudSpanner.CreateSession")
     def create_session(
         self,
         database,
@@ -325,7 +307,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.BatchCreateSessions")
     def batch_create_sessions(
         self,
         database,
@@ -415,7 +396,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.GetSession")
     def get_session(
         self,
         name,
@@ -486,7 +466,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.ListSessions")
     def list_sessions(
         self,
         database,
@@ -601,7 +580,6 @@ class SpannerClient(object):
         )
         return iterator
 
-    @_trace_call("CloudSpanner.DeleteSession")
     def delete_session(
         self,
         name,
@@ -670,7 +648,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.ReadWriteTransaction")
     def execute_sql(
         self,
         session,
@@ -840,7 +817,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.ReadWriteTransaction")
     def execute_streaming_sql(
         self,
         session,
@@ -1005,7 +981,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.DMLTransaction")
     def execute_batch_dml(
         self,
         session,
@@ -1125,7 +1100,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.ReadOnlyTransaction")
     def read(
         self,
         session,
@@ -1269,7 +1243,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.ReadOnlyTransaction")
     def streaming_read(
         self,
         session,
@@ -1409,7 +1382,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.BeginTransaction")
     def begin_transaction(
         self,
         session,
@@ -1489,7 +1461,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.Commit")
     def commit(
         self,
         session,
@@ -1597,7 +1568,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.Rollback")
     def rollback(
         self,
         session,
@@ -1677,7 +1647,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.PartitionReadWriteTransaction")
     def partition_query(
         self,
         session,
@@ -1817,7 +1786,6 @@ class SpannerClient(object):
             request, retry=retry, timeout=timeout, metadata=metadata
         )
 
-    @_trace_call("CloudSpanner.PartitionReadOnlyTransaction")
     def partition_read(
         self,
         session,
@@ -1940,6 +1908,6 @@ class SpannerClient(object):
             )
             metadata.append(routing_metadata)
 
-            return self._inner_api_calls["partition_read"](
-                request, retry=retry, timeout=timeout, metadata=metadata
-            )
+        return self._inner_api_calls["partition_read"](
+            request, retry=retry, timeout=timeout, metadata=metadata
+        )

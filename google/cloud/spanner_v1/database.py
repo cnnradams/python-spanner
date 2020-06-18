@@ -40,6 +40,7 @@ from google.cloud.spanner_v1.gapic.transports import spanner_grpc_transport
 from google.cloud.spanner_v1.keyset import KeySet
 from google.cloud.spanner_v1.pool import BurstyPool
 from google.cloud.spanner_v1.pool import SessionCheckout
+from google.cloud.spanner_v1.metrics import trace_call
 from google.cloud.spanner_v1.session import Session
 from google.cloud.spanner_v1.snapshot import _restart_on_unavailable
 from google.cloud.spanner_v1.snapshot import Snapshot

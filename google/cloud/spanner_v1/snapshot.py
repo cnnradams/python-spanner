@@ -32,7 +32,7 @@ from google.cloud.spanner_v1.streamed import StreamedResultSet
 from google.cloud.spanner_v1.types import PartitionOptions
 from google.cloud.spanner_v1.metrics import trace_call
 
-def _restart_on_unavailable(restart):
+def _restart_on_unavailable(restart, trace_name, session):
     """Restart iteration after :exc:`.ServiceUnavailable`.
 
     :type restart: callable
@@ -40,7 +40,8 @@ def _restart_on_unavailable(restart):
     """
     resume_token = b""
     item_buffer = []
-    iterator = restart()
+    with trace_call(trace_name, session):
+        iterator = restart()
     while True:
         try:
             for item in iterator:
@@ -50,7 +51,8 @@ def _restart_on_unavailable(restart):
                     break
         except ServiceUnavailable:
             del item_buffer[:]
-            iterator = restart(resume_token=resume_token)
+            with trace_call(trace_name, session):
+                iterator = restart(resume_token=resume_token)
             continue
 
         if len(item_buffer) == 0:
@@ -143,10 +145,7 @@ class _SnapshotBase(_SessionWrapper):
             metadata=metadata,
         )
 
-        with trace_call("CloudSpanner.ReadOnlyTransaction", self._session):
-            iterator = _restart_on_unavailable(restart)
-            # it would be nice to get the amount of retries attempted here,
-            # but since iterator is a generator that we don't want to execute we can't
+        iterator = _restart_on_unavailable(restart, "CloudSpanner.ReadOnlyTransaction", self._session)
 
         self._read_request_count += 1
 
@@ -246,8 +245,7 @@ class _SnapshotBase(_SessionWrapper):
             timeout=timeout,
         )
 
-        with trace_call("CloudSpanner.ReadWriteTransaction", self._session): 
-            iterator = _restart_on_unavailable(restart)
+        iterator = _restart_on_unavailable(restart, "CloudSpanner.ReadWriteTransaction", self._session)
 
         self._read_request_count += 1
         self._execute_sql_count += 1
