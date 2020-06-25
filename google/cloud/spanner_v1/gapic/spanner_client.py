@@ -44,8 +44,6 @@ from google.cloud.spanner_v1.proto import transaction_pb2
 from google.protobuf import empty_pb2
 from google.protobuf import struct_pb2
 
-from opentelemetry import trace
-
 _GAPIC_LIBRARY_VERSION = pkg_resources.get_distribution("google-cloud-spanner").version
 
 class SpannerClient(object):

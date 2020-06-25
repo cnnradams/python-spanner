@@ -22,7 +22,7 @@ from google.cloud.exceptions import NotFound
 from google.cloud.spanner_v1._helpers import _metadata_with_prefix
 from google.cloud.spanner_v1.metrics import get_meter, get_unique_pool_id
 from google.cloud.spanner_v1.metrics import trace_call
-from opentelemetry import metrics
+#from opentelemetry import metrics
 from opentelemetry.sdk.metrics import ValueObserver, Counter
 
 import threading

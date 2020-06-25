@@ -1,6 +1,14 @@
 from threading import Lock
-from opentelemetry import trace
+try:
+    from opentelemetry import trace
+    from opentelemetry.instrumentation.utils import http_status_to_canonical_code
+    HAS_OPENTELEMETRY_INSTALLED = True
+except (ImportError, ModuleNotFoundError):
+    HAS_OPENTELEMETRY_INSTALLED = False
+
 from google.cloud.spanner_v1.gapic import spanner_client
+from contextlib import contextmanager
+from google.api_core.exceptions import GoogleAPICallError
 _meter = None
 def set_meter(meter):
     global _meter
@@ -17,13 +25,27 @@ def get_unique_pool_id():
         _unique_pool_id += 1
         return _unique_pool_id
 
-tracer = trace.get_tracer(__name__)
+@contextmanager
+def trace_call(name, session, extra_attributes=None):
+    if not HAS_OPENTELEMETRY_INSTALLED:
+        yield None
+        return
 
-def trace_call(name, session):
+    tracer = trace.get_tracer(__name__)
+
     attributes = {
         "db.type": "spanner",
         "db.url": spanner_client.SpannerClient.SERVICE_ADDRESS,
         "db.instance": session._database.name,
         "net.host.name": spanner_client.SpannerClient.SERVICE_ADDRESS
     }
-    return tracer.start_as_current_span(name, kind=trace.SpanKind.CLIENT, attributes=attributes)
+
+    if extra_attributes:
+        attributes.update(extra_attributes)
+
+    with tracer.start_as_current_span(name, kind=trace.SpanKind.CLIENT, attributes=attributes) as span:
+        try:
+            yield span
+        except GoogleAPICallError as error:
+            span.set_status(http_status_to_canonical_code(error.code))
+            raise
